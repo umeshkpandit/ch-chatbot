@@ -2,6 +2,19 @@
 
 A small Retrieval-Augmented Generation (RAG) app: visitors with an access key ask questions, and Google Gemini answers using only passages retrieved from your CV PDF.
 
+<p align="center">
+  <img src="screenshots/chat.png" alt="Chat answering a question from the CV, with the excerpts used" width="720">
+</p>
+
+<details>
+<summary>Access-key screen</summary>
+
+![Access-key screen](screenshots/login.png)
+
+</details>
+
+> Screenshots use the fictional demo CV (`sample_cv.pdf`).
+
 ```
 cv.pdf → pypdf → section-aware chunks → Gemini embeddings (cached in memory)
 question → embed → NumPy cosine similarity → top-k chunks → Gemini chat → answer + excerpts
