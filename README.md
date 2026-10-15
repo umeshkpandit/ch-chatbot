@@ -2,7 +2,7 @@
 
 A small Retrieval-Augmented Generation (RAG) app: visitors with an access key ask questions, and Google Gemini answers using only passages retrieved from your CV PDF.
 
-**Live demo:** <https://ch-chatbot.streamlit.app/> (access key required, limited to 10 questions per session)
+**Live demo:** <https://cv-chatbot.streamlit.app/> (access key required, limited to 10 questions per session)
 
 <table>
   <tr>
