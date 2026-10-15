@@ -1,0 +1,20 @@
+/* Dark variant: same soft (neumorphic) system, using the portfolio's dark tokens. Loaded after style.css. */
+:root {
+  --surface: #1f2128; --light: #2b2e38; --dark: #121318;
+  --inset-dark: #0b0c10; --inset-light: #2b2e38; --card-dark: #0d0e12;
+  --title: #f1f3f8; --text: #e6e9f0; --muted: #a8b0c0; --soft: #7a8396; --icon: #8f9bb3;
+}
+.stApp { background: linear-gradient(135deg, #252831 0%, #1f2128 55%, #1b1d23 100%); color: var(--text); }
+.stApp p, .stApp li, .stApp label, .stApp summary, .stApp span, .stApp small,
+[data-testid="stMarkdownContainer"] p, [data-testid="stWidgetLabel"] p, [data-testid="stCaptionContainer"] { color: var(--text); }
+.subtle, [data-testid="stMarkdownContainer"] p.subtle, [data-testid="stSidebar"] .stCaption { color: var(--muted); }
+h1, [data-testid="stSidebar"] h2 { color: var(--title); }
+.stButton > button, [data-testid="stDownloadButton"] > button { color: var(--text); }
+.stButton > button:hover { color: #ffd166; }
+[data-testid="stFormSubmitButton"] > button, [data-testid="stFormSubmitButton"] > button p { color: var(--accent-text); }
+[data-testid="stChatMessageAvatarAssistant"] { color: #ffd166 !important; }
+[data-testid="stSidebar"] { box-shadow: 8px 0 24px -8px var(--dark); }
+[data-testid="stChatInput"] button svg { fill: var(--accent-text); }
+.badge { box-shadow: 10px 10px 22px var(--dark), -8px -8px 18px rgb(255 255 255 / .06); }
+[data-testid="stForm"], [data-testid="stChatMessage"] { box-shadow: 14px 14px 32px var(--card-dark), -8px -8px 22px rgb(255 255 255 / .05); }
+[data-testid="stChatInput"], .stButton > button { box-shadow: 8px 8px 18px var(--dark), -6px -6px 14px rgb(255 255 255 / .06); }
