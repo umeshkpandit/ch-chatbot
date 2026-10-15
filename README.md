@@ -2,16 +2,14 @@
 
 A small Retrieval-Augmented Generation (RAG) app: visitors with an access key ask questions, and Google Gemini answers using only passages retrieved from your CV PDF.
 
-<p align="center">
-  <img src="screenshots/chat.png" alt="Chat answering a question from the CV, with the excerpts used" width="720">
-</p>
+**Live demo:** <https://ch-chatbot.streamlit.app/> (access key required, limited to 10 questions per session)
 
-<details>
-<summary>Access-key screen</summary>
-
-![Access-key screen](screenshots/login.png)
-
-</details>
+<table>
+  <tr>
+    <td align="center"><b>Access-key screen</b><br><img src="screenshots/login.png" alt="Access-key screen" width="400"></td>
+    <td align="center"><b>Chat with excerpts</b><br><img src="screenshots/chat.png" alt="Chat answering a question from the CV, with the excerpts used" width="400"></td>
+  </tr>
+</table>
 
 > Screenshots use the fictional demo CV (`sample_cv.pdf`).
 
