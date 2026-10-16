@@ -22,20 +22,19 @@ def test_missing_config_message(monkeypatch):
         assert "Missing configuration" in at.error[0].value
 
 
-def test_gate_rejects_then_locks(monkeypatch):
-    at = run(monkeypatch, GEMINI_API_KEY="x", APP_ACCESS_KEY="secret", MAX_FAILED_ATTEMPTS="2", LOCKOUT_SECONDS="60")
-    at.text_input[0].set_value("wrong").run()
-    at.button[0].click().run()
-    assert any("Incorrect" in e.value for e in at.error)
-    at.text_input[0].set_value("wrong").run()
-    at.button[0].click().run()
-    assert any("Locked" in e.value or "Too many" in e.value for e in at.error)
+def test_gate_rejects_wrong_key_without_locking(monkeypatch):
+    at = run(monkeypatch, GEMINI_API_KEY="x", APP_ACCESS_KEY="secret")
+    for _ in range(8):
+        at.text_input[0].set_value("wrong")
+        at.button[0].click().run()
+        assert any("Incorrect" in e.value for e in at.error)
+        assert not any("Too many" in e.value for e in at.error)
 
 
 def test_question_limit_blocks_chat(monkeypatch):
     import streamlit as st
 
-    st.cache_resource.clear()  # earlier tests leave the shared lockout tracker locked
+    st.cache_resource.clear()  # start from a clean server-wide state
     at = run(monkeypatch, GEMINI_API_KEY="x", APP_ACCESS_KEY="secret", MAX_QUESTIONS_PER_USER="0")
     at.text_input[0].set_value("secret")
     at.button[0].click().run()

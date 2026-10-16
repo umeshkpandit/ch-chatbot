@@ -49,7 +49,7 @@ Put your CV at `cv.pdf` (or set `CV_PATH`). It must be a text-based PDF, not a s
 | `CHAT_FALLBACK_MODEL` | no | `gemini-3-flash-preview` | Used automatically if the main chat model is overloaded (5xx after retries) or not found (404). Set empty to disable. Verify it is still available, since older Gemini models get retired |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | no | `700` / `120` | Characters |
 | `TOP_K` / `MIN_SCORE` | no | `4` / `0.0` | Excerpts per question; similarity floor |
-| `MAX_FAILED_ATTEMPTS` / `LOCKOUT_SECONDS` | no | `5` / `300` | Gate lockout |
+| `OLLAMA_MODEL` / `OLLAMA_URL` | no | off / `http://localhost:11434` | Answer with a local [Ollama](https://ollama.com) model instead of Gemini (`ollama pull <model>` first). Chat text stays on your machine; embeddings still use Gemini. Not practical on Streamlit Cloud's free tier |
 | `MAX_QUESTIONS_PER_USER` | no | `10` | Questions allowed per browser session. A page refresh starts a new session (and a new quota); logging out does not reset it |
 | `MAX_DAILY_QUESTIONS` | no | `200` | Global cap across all visitors per day (server local time). Resets at midnight and on restart |
 | `SHOW_ADMIN_TOOLS` | no | off | Set `true` locally to show the **Test Gemini connection** button; leave off when public |
@@ -124,10 +124,41 @@ PYTHONPATH=. python -c "import rag; from config import load_settings as L; s=L()
 
 For a one-page CV, in-memory is the right trade-off. Persist (an `.npy` file keyed by a PDF hash) only if the CV grows large or restarts become frequent. A vector database is unnecessary at this scale.
 
+## Local LLM (Ollama)
+
+By default answers come from Gemini. You can instead answer with a model running on your own machine, so the chat text never leaves it. Embeddings (retrieval) still use Gemini, so `GEMINI_API_KEY` is still required.
+
+1. Install and start Ollama (macOS):
+   ```
+   brew install ollama
+   brew services start ollama   # or run `ollama serve` in a terminal
+   ```
+2. Download a model (about 2 GB for `llama3.2`):
+   ```
+   ollama pull llama3.2
+   ollama list                  # confirm it is there
+   ```
+3. Set it in `.env` and restart the app:
+   ```
+   OLLAMA_MODEL=llama3.2
+   # OLLAMA_URL=http://localhost:11434   # only if Ollama runs elsewhere
+   ```
+
+Remove or comment out `OLLAMA_MODEL` to go back to Gemini. The first answer is slow while the model loads into memory.
+
+Troubleshooting:
+- `Cannot reach Ollama at ...`: Ollama is not installed or not running. Start it as above.
+- `Ollama model '...' not found`: run `ollama pull <model>` with the exact name in `.env`.
+- Not practical on Streamlit Community Cloud's free tier (no GPU, about 1 GB RAM); use it for local or self-hosted runs.
+
+## Uploading a CV
+
+Use **Upload a CV (PDF)** in the sidebar to chat with a different CV. It is indexed in memory for your session only (max 5 MB, text-based PDF), replaces the default CV until you clear it, and resets the chat. Its text is sent to Google for embeddings. Removing the file returns to the default CV.
+
 ## Security notes
 
 - Secrets live only in `.env` or Streamlit secrets, never in code. `.env` is git-ignored. The Gemini key is only used server-side.
-- The access key is compared in constant time. Failed attempts are counted server-wide (not per browser session, so reloading the page does not reset them) and trigger a lockout. The count resets when the server restarts, and an attacker can lock out legitimate users. That is a deliberate trade-off for a small private app.
+- The access key is compared in constant time. There is no failed-attempt lockout (a shared lockout let one visitor block everyone), so use a long random key, for example `secrets.token_urlsafe(24)`.
 - **Your CV contains personal contact details.** Anyone with the access key can ask for them, and CV text is sent to Google's API. If you do not want that, remove them from the PDF.
 - `*.pdf` is git-ignored so the CV is not pushed by accident.
 

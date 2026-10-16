@@ -11,6 +11,8 @@ from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
 EMBED_BATCH = 50  # chunks per embeddings request
+MAX_UPLOAD_BYTES = 5_000_000
+MAX_UPLOAD_CHUNKS = 150  # caps embedding cost of one uploaded CV
 RETRY_DELAYS = (1.0, 3.0)  # seconds to wait before retry 1 and 2 (transient 5xx only)
 
 SYSTEM_PROMPT = """You are an assistant that answers questions about one person's CV (resume).
@@ -52,8 +54,21 @@ def extract_text(path: Path) -> str:
     path = Path(path)
     if not path.is_file():
         raise CVError(f"CV file not found: {path.name}. Put your CV PDF there or set CV_PATH.")
+    return _read_pdf(str(path))
+
+
+def extract_text_from_bytes(data: bytes) -> str:
+    """Same as extract_text for an uploaded PDF held in memory."""
+    import io
+
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise CVError(f"The file is too large (limit {MAX_UPLOAD_BYTES // 1_000_000} MB).")
+    return _read_pdf(io.BytesIO(data))
+
+
+def _read_pdf(source) -> str:
     try:
-        reader = PdfReader(str(path))
+        reader = PdfReader(source)
         if reader.is_encrypted:
             raise CVError("The CV PDF is password-protected.")
         pages = [(page.extract_text() or "").strip() for page in reader.pages]
@@ -228,6 +243,17 @@ class CVIndex:
         vectors = embed_texts(client, settings.embedding_model, [c.text for c in chunks], "RETRIEVAL_DOCUMENT")
         return cls(chunks, vectors)
 
+    @classmethod
+    def from_upload(cls, client, settings, data: bytes) -> "CVIndex":
+        """Index a CV PDF uploaded by the visitor (kept in memory only, never written to disk)."""
+        chunks = chunk_text(extract_text_from_bytes(data), settings.chunk_size, settings.chunk_overlap)
+        if not chunks:
+            raise CVError("The uploaded CV produced no text chunks.")
+        if len(chunks) > MAX_UPLOAD_CHUNKS:
+            raise CVError("The uploaded file is too long to be a CV. Upload a shorter PDF.")
+        vectors = embed_texts(client, settings.embedding_model, [c.text for c in chunks], "RETRIEVAL_DOCUMENT")
+        return cls(chunks, vectors)
+
     def search(self, client, model: str, question: str, top_k: int = 4, min_score: float = 0.0) -> list[Hit]:
         if not question.strip() or not self.chunks:
             return []
@@ -265,10 +291,41 @@ def _generate(client, model: str, prompt: str) -> str:
     return (resp.text or "").strip()
 
 
+def _generate_ollama(url: str, model: str, prompt: str) -> str:
+    """Answer with a local Ollama model (no extra dependency; plain HTTP to /api/chat)."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    body = json.dumps({
+        "model": model,
+        "stream": False,
+        "options": {"temperature": 0.2},
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+    }).encode()
+    req = urllib.request.Request(f"{url}/api/chat", data=body, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise CVError(f"Ollama model '{model}' not found. Run: ollama pull {model}") from exc
+        raise CVError(f"Ollama returned HTTP {exc.code}.") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise CVError(f"Cannot reach Ollama at {url}. Is it running (ollama serve)?") from exc
+    text = (data.get("message", {}).get("content") or "").strip()
+    if not text:
+        raise CVError("Ollama returned an empty answer. Try rephrasing.")
+    return text
+
+
 def answer(client, model: str, question: str, hits: list[Hit], history: list[dict] | None = None,
-           fallback_model: str = "") -> str:
-    """Answer with `model`; if it is overloaded (5xx after retries) or not found (404), try `fallback_model`."""
+           fallback_model: str = "", ollama_model: str = "", ollama_url: str = "http://localhost:11434") -> str:
+    """Answer with `model`; if it is overloaded (5xx after retries) or not found (404), try `fallback_model`.
+    If `ollama_model` is set, answer locally with Ollama instead and never call Gemini for chat."""
     prompt = build_prompt(question, hits, history)
+    if ollama_model:
+        return _generate_ollama(ollama_url, ollama_model, prompt)
     models = [model] + ([fallback_model] if fallback_model and fallback_model != model else [])
     error: CVError | None = None
     for m in models:

@@ -1,6 +1,5 @@
 """Streamlit UI: access-key gate + chat over the CV."""
 import hmac
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -24,13 +23,6 @@ EXAMPLES = [
     "What is the most recent job and what were the main responsibilities?",
     "Which projects or awards stand out?",
 ]
-
-
-@st.cache_resource
-def _attempt_tracker() -> dict:
-    """Server-wide failed-attempt state, shared by all sessions (so reloading the page
-    does not reset it). Resets when the server process restarts."""
-    return {"failures": 0, "locked_until": 0.0}
 
 
 @st.cache_resource
@@ -69,27 +61,40 @@ def get_index(s: Settings):
     return _index(s.gemini_api_key, str(s.cv_path), mtime, s.embedding_model, s.chunk_size, s.chunk_overlap)
 
 
+def active_index(s: Settings):
+    """The visitor's uploaded CV if there is one, otherwise the default CV."""
+    return st.session_state.get("upload_index") or get_index(s)
+
+
+def handle_upload(s: Settings, file) -> None:
+    """Build an index from the uploaded PDF once per file and switch the chat to it."""
+    sig = (file.name, file.size)
+    if st.session_state.get("upload_sig") == sig:
+        return
+    try:
+        with st.spinner("Reading your CV…"):
+            idx = rag.CVIndex.from_upload(_client(s.gemini_api_key), s, file.getvalue())
+    except rag.CVError as exc:
+        st.sidebar.error(str(exc))
+        return
+    st.session_state.update(upload_index=idx, upload_sig=sig, upload_name=file.name, messages=[])
+    st.rerun()
+
+
 def gate(s: Settings) -> bool:
     """Render the access screen. Returns True once the visitor is authorised."""
     if st.session_state.get("authed"):
         return True
 
-    tracker = _attempt_tracker()
     st.markdown('<div class="badge">🔒</div>', unsafe_allow_html=True)
     st.title("Chat with My CV")
     st.markdown('<p class="subtle">This assistant is private. Enter the access key to continue.</p>', unsafe_allow_html=True)
-
-    remaining = tracker["locked_until"] - time.time()
-    if remaining > 0:
-        st.error(f"Too many failed attempts. Try again in {int(remaining) + 1} seconds.")
-        return False
 
     with st.form("gate"):
         key = st.text_input("Access key", type="password")
         submitted = st.form_submit_button("Unlock chat  →", use_container_width=True)
     if submitted:
         if hmac.compare_digest(key.encode(), s.app_access_key.encode()):
-            tracker["failures"] = 0
             st.session_state["authed"] = True
             with st.spinner("Unlocking… preparing the CV (first time only)"):
                 try:
@@ -97,13 +102,7 @@ def gate(s: Settings) -> bool:
                 except rag.CVError:
                     pass  # chat() shows the error message
             st.rerun()
-        tracker["failures"] += 1
-        if tracker["failures"] >= s.max_failed_attempts:
-            tracker["locked_until"] = time.time() + s.lockout_seconds
-            tracker["failures"] = 0
-            st.error(f"Too many failed attempts. Locked for {s.lockout_seconds} seconds.")
-        else:
-            st.error("Incorrect access key.")
+        st.error("Incorrect access key.")
     st.toggle("Dark mode", key="dark")
     return False
 
@@ -112,6 +111,15 @@ def sidebar(s: Settings) -> bool:
     with st.sidebar:
         st.header("Options")
         show_sources = st.toggle("Show CV excerpts used", value=True)
+        file = st.file_uploader("Upload a CV (PDF) to chat with it", type="pdf",
+                                help="Kept in memory for this session only. Its text is sent to Google for embeddings.")
+        if file is not None:
+            handle_upload(s, file)
+        elif st.session_state.get("upload_index"):  # the uploader was cleared
+            for k in ("upload_index", "upload_sig", "upload_name"):
+                st.session_state.pop(k, None)
+            st.session_state["messages"] = []
+            st.rerun()
         st.toggle("Dark mode", key="dark")
         messages = st.session_state.get("messages", [])
         st.download_button(
@@ -132,11 +140,15 @@ def sidebar(s: Settings) -> bool:
                 except rag.CVError as exc:
                     st.error(str(exc))
         if st.button("Log out", use_container_width=True):
-            for k in ("authed", "messages"):  # keep the question count so logging out cannot reset the quota
+            for k in ("authed", "messages", "upload_index", "upload_sig", "upload_name"):  # keep the question count so logging out cannot reset the quota
                 st.session_state.pop(k, None)
             st.rerun()
         st.caption(f"Questions left: **{questions_left(s)}** of {s.max_questions}")
-        st.caption(f"Chat model: `{s.chat_model}`  \nFallback: `{s.fallback_model or 'off'}`  \nEmbeddings: `{s.embedding_model}`")
+        if s.ollama_model:
+            chat_info = f"Chat: `{s.ollama_model}` (local, Ollama)"
+        else:
+            chat_info = f"Chat model: `{s.chat_model}`  \nFallback: `{s.fallback_model or 'off'}`"
+        st.caption(f"{chat_info}  \nEmbeddings: `{s.embedding_model}`")
     return show_sources
 
 
@@ -159,6 +171,8 @@ def chat(s: Settings) -> None:
         unsafe_allow_html=True,
     )
 
+    if st.session_state.get("upload_name"):
+        st.caption(f"Chatting with your uploaded CV: **{st.session_state['upload_name']}**")
     messages = st.session_state.setdefault("messages", [])
     for m in messages:
         with st.chat_message(m["role"]):
@@ -178,7 +192,7 @@ def chat(s: Settings) -> None:
 
     try:
         with st.spinner("Preparing the CV…"):
-            index = get_index(s)
+            index = active_index(s)
     except rag.CVError as exc:
         st.error(str(exc))
         return
@@ -198,10 +212,14 @@ def chat(s: Settings) -> None:
     history = [{"role": m["role"], "content": m["content"]} for m in messages]
     with st.chat_message("assistant"):
         try:
-            with st.spinner("Searching the CV and writing an answer…"):
+            wait = ("Searching the CV and writing an answer with the local model "
+                    f"({s.ollama_model}). The first answer can take a minute…") if s.ollama_model \
+                else "Searching the CV and writing an answer…"
+            with st.spinner(wait):
                 client = _client(s.gemini_api_key)
                 hits = index.search(client, s.embedding_model, question, s.top_k, s.min_score)
-                reply = rag.answer(client, s.chat_model, question, hits, history, s.fallback_model)
+                reply = rag.answer(client, s.chat_model, question, hits, history, s.fallback_model,
+                                   s.ollama_model, s.ollama_url)
         except rag.CVError as exc:
             st.error(str(exc))
             return

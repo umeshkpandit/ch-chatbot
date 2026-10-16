@@ -206,3 +206,58 @@ def test_heading_glued_to_previous_line():
     assert "Senior Software Engineer" in sections[0][1]
     assert "SUMMARY" not in sections[0][1]
     assert sections[1][1] == "Builds things."
+
+
+def test_ollama_answer(monkeypatch):
+    import io, json
+    import rag
+
+    seen = {}
+
+    def fake_urlopen(req, timeout=0):
+        seen["url"] = req.full_url
+        seen["body"] = json.loads(req.data)
+        return io.BytesIO(json.dumps({"message": {"content": " hi "}}).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    out = rag.answer(None, "gemini", "q?", [], ollama_model="llama3.2", ollama_url="http://x:1")
+    assert out == "hi"
+    assert seen["url"] == "http://x:1/api/chat" and seen["body"]["model"] == "llama3.2"
+
+
+def test_ollama_unreachable(monkeypatch):
+    import urllib.error
+    import pytest
+    import rag
+
+    def boom(*a, **k):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    with pytest.raises(rag.CVError, match="Cannot reach Ollama"):
+        rag.answer(None, "gemini", "q?", [], ollama_model="m")
+
+
+def test_upload_index(monkeypatch):
+    import io
+    import numpy as np
+    import pytest
+    import rag
+    from pypdf import PdfWriter
+
+    with pytest.raises(rag.CVError, match="too large"):
+        rag.extract_text_from_bytes(b"x" * (rag.MAX_UPLOAD_BYTES + 1))
+    with pytest.raises(rag.CVError):
+        rag.extract_text_from_bytes(b"not a pdf")
+    blank = io.BytesIO()
+    w = PdfWriter(); w.add_blank_page(100, 100); w.write(blank)
+    with pytest.raises(rag.CVError, match="No text"):
+        rag.extract_text_from_bytes(blank.getvalue())
+
+    class S:
+        chunk_size, chunk_overlap, embedding_model = 700, 120, "m"
+
+    monkeypatch.setattr(rag, "extract_text_from_bytes", lambda d: "SKILLS\nPython and Go\n")
+    monkeypatch.setattr(rag, "embed_texts", lambda c, m, t, k: np.ones((len(t), 3), dtype=np.float32))
+    idx = rag.CVIndex.from_upload(None, S, b"x")
+    assert idx.chunks and len(idx.embeddings) == len(idx.chunks)

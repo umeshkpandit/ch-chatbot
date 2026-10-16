@@ -32,11 +32,11 @@ class Settings:
     chunk_overlap: int
     top_k: int
     min_score: float
-    max_failed_attempts: int
-    lockout_seconds: int
     max_questions: int
     show_admin_tools: bool
     max_daily_questions: int
+    ollama_model: str
+    ollama_url: str
 
     def missing(self) -> list[str]:
         out = []
@@ -60,9 +60,9 @@ def load_settings() -> Settings:
         chunk_overlap=int(_get("CHUNK_OVERLAP", "120")),
         top_k=int(_get("TOP_K", "4")),
         min_score=float(_get("MIN_SCORE", "0.0")),
-        max_failed_attempts=int(_get("MAX_FAILED_ATTEMPTS", "5")),
-        lockout_seconds=int(_get("LOCKOUT_SECONDS", "300")),
         max_questions=int(_get("MAX_QUESTIONS_PER_USER", "10")),
         max_daily_questions=int(_get("MAX_DAILY_QUESTIONS", "200")),
+        ollama_model=_get("OLLAMA_MODEL"),
+        ollama_url=_get("OLLAMA_URL", "http://localhost:11434").rstrip("/"),
         show_admin_tools=_get("SHOW_ADMIN_TOOLS").lower() in ("1", "true", "yes"),
     )
