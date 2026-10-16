@@ -11,3 +11,6 @@ toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false
+
+[server]
+maxUploadSize = 5  # MB; matches MAX_UPLOAD_BYTES in rag.py
